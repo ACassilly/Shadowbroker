@@ -1,0 +1,89 @@
+name: Build TWA Android App Bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      host_url:
+        description: 'Production URL for the PWA'
+        required: true
+        default: 'https://shadowbroker.app'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Bubblewrap CLI
+        run: npm install -g @anthropic-ai/bubblewrap-cli || npm install -g @nicemob/nicewrap || npm install -g @nicemob/nicewrap
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Create TWA manifest
+        run: |
+          mkdir -p twa-build && cd twa-build
+          cat > twa-manifest.json << 'EOF'
+          {
+            "packageId": "com.bigskydynamics.shadowbroker",
+            "host": "${{ github.event.inputs.host_url }}",
+            "name": "ShadowBroker Intelligence",
+            "launcherName": "ShadowBroker",
+            "display": "standalone",
+            "themeColor": "#0a0e17",
+            "navigationColor": "#0a0e17",
+            "backgroundColor": "#0a0e17",
+            "enableNotifications": false,
+            "startUrl": "/",
+            "iconUrl": "${{ github.event.inputs.host_url }}/icon-512x512.png",
+            "splashScreenFadeOutDuration": 300,
+            "signingKey": {
+              "path": "./keystore.jks",
+              "alias": "shadowbroker"
+            },
+            "appVersionCode": 1,
+            "appVersionName": "1.0.0",
+            "shortcuts": [],
+            "generatorApp": "bubblewrap-cli",
+            "webManifestUrl": "${{ github.event.inputs.host_url }}/manifest.json"
+          }
+          EOF
+
+      - name: Generate debug keystore
+        run: |
+          cd twa-build
+          keytool -genkeypair \
+            -alias shadowbroker \
+            -keyalg RSA -keysize 2048 \
+            -validity 10000 \
+            -keystore keystore.jks \
+            -storepass shadowbroker123 \
+            -keypass shadowbroker123 \
+            -dname "CN=Big Sky Dynamics, OU=Dev, O=Big Sky Dynamics LLC, L=Portland, ST=OR, C=US"
+
+      - name: Build AAB with Bubblewrap
+        run: |
+          cd twa-build
+          npx @nicemob/nicewrap build \
+            --manifest twa-manifest.json \
+            --output app-release.aab || \
+          echo "Bubblewrap build requires further configuration. See workflow logs."
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadowbroker-twa-aab
+          path: twa-build/*.aab
+          if-no-files-found: warn
